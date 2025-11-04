@@ -38,7 +38,7 @@ st.set_page_config(
 )
 
 # -----------------------------
-# Styling (Ensures download button text is WHITE)
+# Styling (Ensures download button text is WHITE and all main text is dark)
 # -----------------------------
 st.markdown(
     """
@@ -54,7 +54,7 @@ st.markdown(
 
     /* Ensure all general text is dark/black for readability */
     .stMarkdown, label, p, .stCaption, div[data-testid="stText"] { color: #333 !important; }
-
+    
     /* Info/Alert boxes */
     div[data-testid="stAlert"] { background-color: #f7f6f4 !important; border: 1px solid #dcd4c3 !important; border-radius: 0.25rem !important; }
     div[data-testid="stAlert"] > div:first-child { background-color: transparent !important; }
@@ -84,9 +84,8 @@ st.markdown(
         text-transform: uppercase !important;
     }
     
-    /* SPECIFIC CSS TO FORCE WHITE FONT COLOR ON THE DOWNLOAD BUTTON LINK/TEXT */
-    div[data-testid="stDownloadButton"] button[data-testid^="stBaseButton"] > div > a,
-    div[data-testid="stDownloadButton"] button[data-testid^="stBaseButton"] > div > span {
+    /* NEW: SPECIFIC CSS TO FORCE WHITE FONT COLOR ON THE DOWNLOAD BUTTON TEXT (inside the <p> tag) */
+    div[data-testid="stDownloadButton"] p {
         color: #FFFFFF !important;
     }
 
@@ -203,6 +202,33 @@ def to_xlsx_bytes_with_spinner(df: pd.DataFrame, sheet_name: str = "Conversion O
         return buf.getvalue()
 
 # -----------------------------
+# Internal Setup (Hidden from UI)
+# -----------------------------
+csv_url = to_csv_export_url(DEFAULT_SHEET_URL)
+mapping_df = read_mapping_from_gsheets(csv_url) if csv_url else pd.DataFrame()
+
+# Check for successful internal load
+if mapping_df.empty:
+    st.stop() 
+
+# Internal column validation and preparation
+required = OUTPUT_HEADERS + ["OLD Item-variant", "Ean no."]
+colmap = map_case_insensitive(mapping_df, required)
+
+if not colmap.get("OLD Item-variant") or not colmap.get("Ean no."):
+    st.error(
+        "❌ Internal Error: Required mapping columns are missing. Please contact Muuto support."
+    )
+    st.stop()
+
+old_col = colmap["OLD Item-variant"]
+ean_col = colmap["Ean no."]
+work = mapping_df.copy()
+work[old_col] = work[old_col].astype(str).str.strip()
+work[ean_col] = work[ean_col].astype(str).str.strip()
+
+
+# -----------------------------
 # App Main Content (Customer-facing flow)
 # -----------------------------
 
@@ -249,27 +275,8 @@ ids = parse_pasted_ids(raw_input)
 # -----------------------------
 if ids:
     # --- Internal Setup (TRIGGERED HERE) ---
-    csv_url = to_csv_export_url(DEFAULT_SHEET_URL)
-    mapping_df = read_mapping_from_gsheets(csv_url)
+    # The setup logic is defined outside the main blocks, but the data is only loaded here.
     
-    if mapping_df.empty:
-        st.stop()
-
-    required = OUTPUT_HEADERS + ["OLD Item-variant", "Ean no."]
-    colmap = map_case_insensitive(mapping_df, required)
-
-    if not colmap.get("OLD Item-variant") or not colmap.get("Ean no."):
-        st.error(
-            "❌ Internal Error: Required mapping columns are missing. Please contact Muuto support."
-        )
-        st.stop()
-
-    old_col = colmap["OLD Item-variant"]
-    ean_col = colmap["Ean no."]
-    work = mapping_df.copy()
-    work[old_col] = work[old_col].astype(str).str.strip()
-    work[ean_col] = work[ean_col].astype(str).str.strip()
-
     # -----------------------------
     # Step 2: Results and Export
     # -----------------------------
