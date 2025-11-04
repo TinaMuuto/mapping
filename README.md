@@ -1,1 +1,52 @@
-📦 Muuto Item Number Converter (Mapping Lookup Tool)This is a user-friendly web tool designed to provide fast and accurate conversion from your legacy Muuto Item-Variants and EANs to the new Item Numbers.The tool uses a secure, centralized database to ensure you always receive the correct and up-to-date product information.🚀 How to Use the ToolAccessThe application is hosted on Streamlit Cloud and can be accessed via your designated link:[suspicious link removed]🛠️ The 2-Step Conversion ProcessThe tool is designed for maximum speed and simplicity.Step 1: Paste Item IDsInput: Copy the list of old Item-Variants or EAN numbers you need to convert from your system.Paste: Enter the IDs into the large text box in the application. IDs can be separated by new lines, commas, or spaces.Action: The application immediately starts processing the data against the central Muuto database.Step 2: View Results and DownloadView Conversion: The result table displays all matched items, including the New Item No., Description, Family, and Category.Check Missing Items: Any IDs that could not be found (often due to typos or outdated information) are clearly listed in a warning box.Download: Click the Download Results as Excel File (.xlsx) button to save the complete table for use in your local systems.🎯 Output Data FieldsThe resulting Excel file always contains the converted data in this consistent format:Column NamePurposeNew Item No.The new Muuto product code (the result of the conversion).OLD Item-variantThe original Item-Variant used for the lookup.Ean no.The EAN/Barcode number associated with the item.DescriptionProduct description.FamilyThe new product family (e.g., Sofas, Lighting).CategoryThe product category.🔒 Data Source IntegrityDatabase: The tool relies on a central, private Google Sheet located here: https://docs.google.com/spreadsheets/d/1S50it_q1BahpZCPW8dbuN7DyOMnyDgFIg76xIDSoXEk/edit?gid=1056617222#gid=1056617222Security: The app reads the raw data privately in the background. Customers never see or access the underlying Google Sheet file.Reliability: Data is read as text to ensure accuracy, particularly preserving leading zeros in EAN numbers.📞 SupportFor support regarding tool errors, data inaccuracies, or questions about the new item numbers, please contact your Muuto sales representative.
+## 📦 Muuto Varenummer Konvertering (Mapping Lookup Værktøj)
+
+Dette er et brugervenligt webværktøj designet til at give **hurtig og præcis konvertering** fra dine gamle Muuto Vare-varianter og EAN-numre til de nye varenumre.
+
+Værktøjet bruger en sikker, centraliseret database for at sikre, at du altid modtager de korrekte og opdaterede produktoplysninger.
+
+***
+
+## 🚀 Sådan bruges værktøjet
+
+### Adgang
+
+Applikationen er hostet på Streamlit Cloud og kan tilgås via følgende link:
+
+[**https://muuto-mapping.streamlit.app/**](https://muuto-mapping.streamlit.app/)
+
+### 🛠️ Den Simple 2-Trins Konverteringsproces
+
+Værktøjet er optimeret for maksimal hastighed og enkelhed for vores kunder.
+
+#### **Trin 1: Indsæt ID'er**
+
+1.  **Input:** Kopier listen over **gamle Vare-varianter** eller **EAN-numre**, du skal konvertere fra dit system.
+2.  **Indsæt:** Indtast ID'erne i den store tekstboks i applikationen. ID'erne kan adskilles af linjeskift, kommaer eller mellemrum.
+3.  **Bemærk:** Applikationen indlæser straks mappingdatabasen i baggrunden, når ID'erne er indsat.
+
+#### **Trin 2: Se Resultater og Download**
+
+1.  **Se Konvertering:** Resultattabellen viser alle matchede varer, inklusive det **Nye Varenummer**, **Beskrivelse**, **Familie** og **Kategori**.
+2.  **Manglende ID'er:** ID'er, der ikke kunne findes, vises tydeligt i en advarselsboks, så du hurtigt kan tjekke for tastefejl.
+3.  **Download:** Klik på knappen **Download Resultat som Excel-fil (.xlsx)** for at gemme den komplette tabel. En statusindikator vises, mens filen genereres.
+
+***
+
+## 🎯 Output Datafelter
+
+Den resulterende Excel-fil indeholder altid de konverterede data i dette konsistente format:
+
+| Kolonne Navn | Formål |
+| :--- | :--- |
+| **New Item No.** | Det **nye** Muuto varenummer (resultatet af konverteringen). |
+| **OLD Item-variant** | Den oprindelige Vare-variant brugt til opslaget. |
+| **Ean no.** | EAN/Stregkodenummeret forbundet med varen. |
+| **Description** | Produktbeskrivelse. |
+| **Family** | Den nye produktfamilie (f.eks. Sofaer, Belysning). |
+| **Category** | Produktkategorien. |
+
+***
+
+## 📞 Support
+
+For support vedrørende fejl i værktøjet, dataunøjagtigheder eller spørgsmål om de nye varenumre, bedes du kontakte din **Muuto salgsrepræsentant.**
