@@ -225,13 +225,21 @@ with left:
     st.markdown("---")
     st.markdown(
         """
-        **Convert legacy Item-Variants or EANs to new Muuto item numbers.**
+        **Welcome to the Muuto Item Number Converter**
 
-        **How It Works**
-        1. Paste IDs  
-        2. Click **Convert IDs**  
-        3. See exact matches  
-        4. Download results  
+        This tool is designed to make the transition from our old item numbers to the new structure as smooth as possible.
+        Your **EAN numbers remain unchanged**, but the **old Muuto item numbers have been replaced to ensure a clearer and more consistent structure**.
+
+        **How to use the tool:**
+        1. Copy the Muuto item numbers or the EAN codes you currently have in your system.  
+        2. Paste them into the field below.  
+        3. The tool will return:  
+            - The new Muuto item number  
+            - The corresponding EAN  
+            - The product description  
+
+        If an item number cannot be matched, it may be discontinued or contain an error.  
+        Please feel free to contact us at **customercare@muuto.com** for support.
         """
     )
 with right:
@@ -240,15 +248,16 @@ with right:
 
 st.markdown("---")
 
-st.header("1. Paste Item IDs")
+st.header("1. Paste Item Numbers or EAN codes")
 raw_input = st.text_area(
-    "Paste Old Item Numbers or EANs here:",
+    "Paste Old Muuto Item Numbers or EAN Codes here:",
     height=200,
     key="ids_input",
 )
-ids = parse_pasted_ids(raw_input)
 
+ids = parse_pasted_ids(raw_input)
 submitted = st.button("Convert IDs")
+
 
 # ---------------------------------------------------------
 # LOGIK – submit + session_state til at bevare resultat
