@@ -15,9 +15,8 @@ except NameError:
     BASE_DIR = "."
     LOGO_PATH = "muuto_logo.png"
 
-# Mapping file locations
-MAPPING_XLSX = os.path.join(BASE_DIR, "mapping.xlsx")
-MAPPING_ZIP = os.path.join(BASE_DIR, "mapping.xlsx.zip")
+# Mapping file (CSV inside ZIP only)
+MAPPING_CSV_ZIP = os.path.join(BASE_DIR, "mapping.csv.zip")
 
 # Output headers
 OUTPUT_HEADERS = [
@@ -40,7 +39,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# Safe CSS injection (NO triple quotes inside the string)
+# Safe CSS
 # ---------------------------------------------------------
 st.markdown(
     '''
@@ -58,9 +57,7 @@ st.markdown(
         div[data-testid="stAlert"] { background-color: #f7f6f4 !important; border: 1px solid #dcd4c3 !important; border-radius: 0.25rem !important; }
         div[data-testid="stAlert"] > div:first-child { background-color: transparent !important; }
 
-        div[data-testid="stDownloadButton"] p {
-            color: white !important;
-        }
+        div[data-testid="stDownloadButton"] p { color: white !important; }
 
         div[data-testid="stDownloadButton"] button,
         div[data-testid="stButton"] button {
@@ -95,48 +92,38 @@ def parse_pasted_ids(raw: str) -> List[str]:
     return out
 
 
-@st.cache_data(show_spinner="Loading mapping file...")
-def read_mapping_from_disk(xlsx_path: str, zip_path: str) -> pd.DataFrame:
-    if os.path.exists(xlsx_path):
-        try:
-            df = pd.read_excel(xlsx_path, dtype=str)
-            df.columns = [c.strip() for c in df.columns]
-            for c in df.columns:
-                df[c] = df[c].astype(str).str.strip()
-            return df
-        except Exception:
-            st.error("Could not load mapping.xlsx")
-            return pd.DataFrame()
-
+@st.cache_data(show_spinner=False)
+def read_mapping_from_csv_zip(zip_path: str) -> pd.DataFrame:
+    """Load mapping.csv from mapping.csv.zip (fast + safe)."""
     if os.path.exists(zip_path):
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                if "mapping.xlsx" not in zf.namelist():
-                    st.error("ZIP file does not contain mapping.xlsx")
+                if "mapping.csv" not in zf.namelist():
+                    st.error("ZIP file does not contain mapping.csv")
                     return pd.DataFrame()
-                with zf.open("mapping.xlsx") as f:
-                    df = pd.read_excel(f, dtype=str)
+
+                with zf.open("mapping.csv") as f:
+                    df = pd.read_csv(f, dtype=str, encoding="utf-8", sep=",")
                     df.columns = [c.strip() for c in df.columns]
                     for c in df.columns:
                         df[c] = df[c].astype(str).str.strip()
                     return df
-        except Exception:
-            st.error("Could not read mapping.xlsx.zip")
+
+        except Exception as e:
+            st.error(f"Failed to read mapping.csv.zip: {e}")
             return pd.DataFrame()
 
-    st.error("No mapping file found.")
+    st.error("mapping.csv.zip not found in repository.")
     return pd.DataFrame()
 
 
 def select_order_and_rename(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame()
-
     for h in OUTPUT_HEADERS:
         if h in df.columns:
             out[h] = df[h]
         else:
             out[h] = None
-
     return out
 
 
@@ -150,38 +137,28 @@ def to_xlsx_bytes_with_spinner(df: pd.DataFrame) -> bytes:
 
 
 # ---------------------------------------------------------
-# Load mapping
-# ---------------------------------------------------------
-mapping_df = read_mapping_from_disk(MAPPING_XLSX, MAPPING_ZIP)
-
-if mapping_df.empty:
-    st.stop()
-
-# Check required columns
-required_cols = [OLD_COL_NAME, EAN_COL_NAME]
-
-for col in required_cols:
-    if col not in mapping_df.columns:
-        st.error(
-            f"Required column '{col}' is missing.\n\n"
-            f"Available columns: {list(mapping_df.columns)}"
-        )
-        st.stop()
-
-# ---------------------------------------------------------
-# UI
+# UI — unchanged
 # ---------------------------------------------------------
 left, right = st.columns([6, 1])
 with left:
     st.title("Muuto Item Number Converter")
     st.markdown("---")
+    st.markdown(
+        """
+        **This tool is the simplest way to map your legacy Item-Variants and EANs to the new Muuto Item Numbers.**
 
+        **How It Works:**
+        * **1. Paste IDs:** Enter your old item codes or EAN numbers below.
+        * **2. View & Download:** Get instant results showing the new Item Number, Description, Family, and Category.
+        """
+    )
 with right:
     if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, width=120)
 
-st.header("1. Paste Item IDs")
+st.markdown("---")
 
+st.header("1. Paste Item IDs")
 raw_input = st.text_area(
     "Paste your Old Item Numbers or EANs here:",
     height=200
@@ -189,18 +166,53 @@ raw_input = st.text_area(
 
 ids = parse_pasted_ids(raw_input)
 
+# ---------------------------------------------------------
+# Load mapping only IF IDs have been entered
+# ---------------------------------------------------------
 if ids:
     st.header("2. Results and Export")
 
+    with st.spinner("Loading mapping file..."):
+        mapping_df = read_mapping_from_csv_zip(MAPPING_CSV_ZIP)
+
+        if mapping_df.empty:
+            st.error("Mapping file is empty or unreadable.")
+            st.stop()
+
+        # Required columns check
+        required_cols = [OLD_COL_NAME, EAN_COL_NAME]
+        for col in required_cols:
+            if col not in mapping_df.columns:
+                st.error(
+                    f"Required column '{col}' not found.\nAvailable: {list(mapping_df.columns)}"
+                )
+                st.stop()
+
+    # Clean
+    mapping_df[OLD_COL_NAME] = mapping_df[OLD_COL_NAME].astype(str).str.strip()
+    mapping_df[EAN_COL_NAME] = mapping_df[EAN_COL_NAME].astype(str).str.strip()
+
+    # Lookup
     mask = mapping_df[OLD_COL_NAME].isin(ids) | mapping_df[EAN_COL_NAME].isin(ids)
     matches = mapping_df.loc[mask].copy()
 
     ordered = select_order_and_rename(matches)
 
+    # Feedback
+    c1, c2, c3 = st.columns([1, 1, 4])
+    with c1:
+        st.metric("IDs Provided", len(ids))
+    with c2:
+        st.metric("Matches Found", len(ordered))
+    with c3:
+        pass
+
+    # Results
+    st.subheader("Conversion Result Table")
     st.dataframe(ordered, use_container_width=True, hide_index=True)
 
+    # Download
     xlsx = to_xlsx_bytes_with_spinner(ordered)
-
     st.download_button(
         "Download Excel",
         data=xlsx,
@@ -211,6 +223,5 @@ if ids:
 else:
     st.info("Paste your IDs to begin.")
 
-
-# footer
+# Footer
 st.markdown("<hr><div style='text-align:center'>For support contact your Muuto representative.</div>", unsafe_allow_html=True)
