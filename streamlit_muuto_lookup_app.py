@@ -197,12 +197,12 @@ def exact_lookup(ids: List[str], df: pd.DataFrame) -> pd.DataFrame:
 
         if idxs:
             tmp = df.loc[idxs].copy()
-            tmp["Query"] = raw_id
+            tmp["Your input"] = raw_id
             tmp["Match Type"] = "Exact"
             rows.append(tmp)
         else:
             empty_row = {h: None for h in OUTPUT_HEADERS}
-            empty_row["Query"] = raw_id
+            empty_row["Your input"] = raw_id
             empty_row["Match Type"] = "No match"
             rows.append(pd.DataFrame([empty_row]))
 
