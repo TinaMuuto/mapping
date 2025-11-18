@@ -5,6 +5,7 @@ import os
 import re
 from typing import List
 import zipfile
+from collections import defaultdict
 
 # --- Paths og konstanter ---
 try:
@@ -103,10 +104,11 @@ def autodetect_separator(first_chunk: str) -> str:
 def normalize_id(s: str) -> str:
     """
     Normaliser ID til match:
-    - upper case
-    - fjern ALT der ikke er A-Z eller 0-9 (inkl. mellemrum, '-', '.', '/')
+    - strip whitespace
+    - behandl alt som streng
+    - ingen andre aggressive ændringer
     """
-    return re.sub(r"[^A-Z0-9]", "", str(s).upper())
+    return str(s).strip()
 
 
 @st.cache_data(show_spinner=False)
@@ -155,69 +157,49 @@ def to_xlsx_bytes(df: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 
-def deterministic_lookup(ids: List[str], df: pd.DataFrame) -> pd.DataFrame:
+def build_index(df: pd.DataFrame) -> dict:
     """
-    For hvert ID:
-    1) Exact match på normaliseret værdi (OLD / EAN)
-    2) Hvis ingen: prefix-match begge veje (ID starter med mapping, mapping starter med ID)
-    3) Hvis ingen: substring-match
-    4) Hvis stadig ingen: tom række
+    Byg et hurtigt index:
+    normaliseret ID -> liste af DataFrame-indekser
+    Indexer både Old Item no. og Ean No.
     """
+    index_map = defaultdict(list)
 
+    for i, val in df[OLD_COL_NAME].items():
+        key = normalize_id(val)
+        if key:
+            index_map[key].append(i)
+
+    for i, val in df[EAN_COL_NAME].items():
+        key = normalize_id(val)
+        if key:
+            index_map[key].append(i)
+
+    return index_map
+
+
+def exact_lookup(ids: List[str], df: pd.DataFrame) -> pd.DataFrame:
+    """
+    For hvert ID: exact match på normaliseret værdi (OLD/EAN) vha. pre-bygget index.
+    Ingen fuzzy, ingen prefix, ingen substring → hurtigt og forudsigeligt.
+    """
+    index_map = build_index(df)
     rows = []
 
     for raw_id in ids:
-        norm_id = normalize_id(raw_id)
+        key = normalize_id(raw_id)
+        idxs = index_map.get(key, [])
 
-        # Exact match på normaliserede kolonner
-        exact = df[(df["_OLD_norm"] == norm_id) | (df["_EAN_norm"] == norm_id)]
-
-        if not exact.empty:
-            tmp = exact.copy()
+        if idxs:
+            tmp = df.loc[idxs].copy()
             tmp["Query"] = raw_id
             tmp["Match Type"] = "Exact"
             rows.append(tmp)
-            continue
-
-        # Prefix: mapping starter med ID
-        prefix_old = df[df["_OLD_norm"].str.startswith(norm_id)]
-        prefix_ean = df[df["_EAN_norm"].str.startswith(norm_id)]
-
-        if not prefix_old.empty or not prefix_ean.empty:
-            tmp = pd.concat([prefix_old, prefix_ean]).drop_duplicates()
-            tmp["Query"] = raw_id
-            tmp["Match Type"] = "Prefix (ID shorter)"
-            rows.append(tmp)
-            continue
-
-        # Prefix: ID starter med mapping (mapping er "basis", ID mere detaljeret)
-        prefix_old_rev = df[df["_OLD_norm"].apply(lambda x: norm_id.startswith(x) if isinstance(x, str) else False)]
-        prefix_ean_rev = df[df["_EAN_norm"].apply(lambda x: norm_id.startswith(x) if isinstance(x, str) else False)]
-
-        if not prefix_old_rev.empty or not prefix_ean_rev.empty:
-            tmp = pd.concat([prefix_old_rev, prefix_ean_rev]).drop_duplicates()
-            tmp["Query"] = raw_id
-            tmp["Match Type"] = "Prefix (mapping shorter)"
-            rows.append(tmp)
-            continue
-
-        # Substring-match som sidste forsøg
-        substr = df[
-            df["_OLD_norm"].str.contains(norm_id, na=False)
-            | df["_EAN_norm"].str.contains(norm_id, na=False)
-        ]
-        if not substr.empty:
-            tmp = substr.copy()
-            tmp["Query"] = raw_id
-            tmp["Match Type"] = "Substring"
-            rows.append(tmp)
-            continue
-
-        # Ingen match
-        empty_row = {h: None for h in OUTPUT_HEADERS}
-        empty_row["Query"] = raw_id
-        empty_row["Match Type"] = "No match"
-        rows.append(pd.DataFrame([empty_row]))
+        else:
+            empty_row = {h: None for h in OUTPUT_HEADERS}
+            empty_row["Query"] = raw_id
+            empty_row["Match Type"] = "No match"
+            rows.append(pd.DataFrame([empty_row]))
 
     result = pd.concat(rows, ignore_index=True)
 
@@ -243,7 +225,7 @@ with left:
         **How It Works**
         1. Paste IDs  
         2. Click **Convert IDs**  
-        3. See matches (Exact / Prefix / Substring)  
+        3. See exact matches  
         4. Download results  
         """
     )
@@ -284,17 +266,13 @@ if submitted:
             )
             st.stop()
 
-        # Normaliser kolonner til match
-        mapping_df["_OLD_norm"] = mapping_df[OLD_COL_NAME].apply(normalize_id)
-        mapping_df["_EAN_norm"] = mapping_df[EAN_COL_NAME].apply(normalize_id)
-
         # Sørg for at alle outputkolonner findes (Family/Category kan mangle i CSV)
         for h in OUTPUT_HEADERS:
             if h not in mapping_df.columns:
                 mapping_df[h] = None
 
-        # Deterministisk match (exact + prefix + substring)
-        results = deterministic_lookup(ids, mapping_df)
+        # Exact lookup via index
+        results = exact_lookup(ids, mapping_df)
 
         matches_count = (results["Match Type"] != "No match").sum()
         results_sorted = results.sort_values(
