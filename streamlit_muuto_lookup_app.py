@@ -18,13 +18,12 @@ except NameError:
 MAPPING_ZIP_PATH = os.path.join(BASE_DIR, "mapping.csv.zip")
 MAPPING_FILENAME = "mapping.csv"
 
+# Kun de kolonner, du vil have i output
 OUTPUT_HEADERS = [
     "New Item No.",
     "Old Item no.",
     "Ean No.",
     "Description",
-    "Family",
-    "Category",
 ]
 
 OLD_COL_NAME = "Old Item no."
@@ -97,34 +96,24 @@ def autodetect_separator(first_chunk: str) -> str:
         return "\t"
     if "," in first_chunk:
         return ","
-    return ","
+    return ";"  # fallback – i din fil er det semikolon
 
 
 def normalize_id(s: str) -> str:
     """
     Normaliser ID til match:
     - strip whitespace
-    - hvis formatet ligner tal eller tal med .0/,0 (typisk Excel), så reducer til heltal
-    - ellers returner strengen som den er
+    - hvis kun tal: fjern foranstillede nuller (03318 -> 3318, 07019 -> 7019)
+    - ellers: returner strengen som den er
     """
     s = str(s).strip()
     if not s:
         return ""
 
-    # ensret decimaltegn
-    tmp = s.replace(",", ".")
-    # rent heltal
-    if re.fullmatch(r"\d+", tmp):
-        return tmp
-    # tal med decimaler, fx 7019.0 eller 7019.00
-    m = re.fullmatch(r"(\d+)\.(\d+)", tmp)
-    if m:
-        int_part, dec_part = m.groups()
-        # hvis alle decimaler er 0, så betragtes det som heltal
-        if set(dec_part) <= {"0"}:
-            return int_part
+    if re.fullmatch(r"\d+", s):
+        no_leading = s.lstrip("0")
+        return no_leading or "0"
 
-    # alt andet (alfa-numerisk, bindestreger osv.) lader vi være
     return s
 
 
@@ -219,6 +208,7 @@ def exact_lookup(ids: List[str], df: pd.DataFrame) -> pd.DataFrame:
 
     result = pd.concat(rows, ignore_index=True)
 
+    # Sørg for at alle OUTPUT_HEADERS eksisterer
     for h in OUTPUT_HEADERS:
         if h not in result.columns:
             result[h] = None
@@ -251,7 +241,11 @@ with right:
 st.markdown("---")
 
 st.header("1. Paste Item IDs")
-raw_input = st.text_area("Paste Old Item Numbers or EANs here:", height=200, key="ids_input")
+raw_input = st.text_area(
+    "Paste Old Item Numbers or EANs here:",
+    height=200,
+    key="ids_input",
+)
 ids = parse_pasted_ids(raw_input)
 
 submitted = st.button("Convert IDs")
@@ -276,6 +270,7 @@ if submitted:
                         f"Actual columns: {list(mapping_df.columns)}"
                     )
                 else:
+                    # Sørg for at alle outputkolonner findes (kun de 4 du vil have)
                     for h in OUTPUT_HEADERS:
                         if h not in mapping_df.columns:
                             mapping_df[h] = None
