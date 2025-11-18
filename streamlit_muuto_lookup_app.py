@@ -51,7 +51,6 @@ st.markdown(
         h1 { color: #5B4A14; font-size: 2.5em; margin-top: 0; }
         h2 { color: #333 !important; border-bottom: 1px solid #CCC; }
 
-        /* Hvid tekst på alle knapper */
         div[data-testid="stDownloadButton"] button,
         div[data-testid="stButton"] button {
             border: 1px solid #5B4A14 !important;
@@ -105,10 +104,28 @@ def normalize_id(s: str) -> str:
     """
     Normaliser ID til match:
     - strip whitespace
-    - behandl alt som streng
-    - ingen andre aggressive ændringer
+    - hvis formatet ligner tal eller tal med .0/,0 (typisk Excel), så reducer til heltal
+    - ellers returner strengen som den er
     """
-    return str(s).strip()
+    s = str(s).strip()
+    if not s:
+        return ""
+
+    # ensret decimaltegn
+    tmp = s.replace(",", ".")
+    # rent heltal
+    if re.fullmatch(r"\d+", tmp):
+        return tmp
+    # tal med decimaler, fx 7019.0 eller 7019.00
+    m = re.fullmatch(r"(\d+)\.(\d+)", tmp)
+    if m:
+        int_part, dec_part = m.groups()
+        # hvis alle decimaler er 0, så betragtes det som heltal
+        if set(dec_part) <= {"0"}:
+            return int_part
+
+    # alt andet (alfa-numerisk, bindestreger osv.) lader vi være
+    return s
 
 
 @st.cache_data(show_spinner=False)
@@ -124,12 +141,12 @@ def read_mapping_from_zip(zip_path: str, filename: str) -> pd.DataFrame:
                 st.error(f"ZIP file does not contain {filename}")
                 return pd.DataFrame()
 
-            # Læs et lille chunk for at gætte separator
+            # Gæt separator
             with zf.open(filename) as f:
                 head = f.read(5000).decode("utf-8", errors="ignore")
                 sep = autodetect_separator(head)
 
-            # Læs hele filen med den fundne separator
+            # Læs hele filen
             with zf.open(filename) as f:
                 df = pd.read_csv(
                     f,
@@ -159,8 +176,8 @@ def to_xlsx_bytes(df: pd.DataFrame) -> bytes:
 
 def build_index(df: pd.DataFrame) -> dict:
     """
-    Byg et hurtigt index:
-    normaliseret ID -> liste af DataFrame-indekser
+    Byg index:
+    normaliseret ID -> liste af rækker (index)
     Indexer både Old Item no. og Ean No.
     """
     index_map = defaultdict(list)
@@ -180,8 +197,7 @@ def build_index(df: pd.DataFrame) -> dict:
 
 def exact_lookup(ids: List[str], df: pd.DataFrame) -> pd.DataFrame:
     """
-    For hvert ID: exact match på normaliseret værdi (OLD/EAN) vha. pre-bygget index.
-    Ingen fuzzy, ingen prefix, ingen substring → hurtigt og forudsigeligt.
+    For hvert ID: exact match på normaliseret værdi (OLD/EAN) vha. index.
     """
     index_map = build_index(df)
     rows = []
@@ -203,7 +219,6 @@ def exact_lookup(ids: List[str], df: pd.DataFrame) -> pd.DataFrame:
 
     result = pd.concat(rows, ignore_index=True)
 
-    # Sørg for at alle OUTPUT_HEADERS eksisterer
     for h in OUTPUT_HEADERS:
         if h not in result.columns:
             result[h] = None
@@ -236,56 +251,59 @@ with right:
 st.markdown("---")
 
 st.header("1. Paste Item IDs")
-raw_input = st.text_area("Paste Old Item Numbers or EANs here:", height=200)
+raw_input = st.text_area("Paste Old Item Numbers or EANs here:", height=200, key="ids_input")
 ids = parse_pasted_ids(raw_input)
 
 submitted = st.button("Convert IDs")
 
 # ---------------------------------------------------------
-# EXECUTE WHEN USER CLICKS
+# LOGIK – submit + session_state til at bevare resultat
 # ---------------------------------------------------------
 if submitted:
     if not ids:
         st.error("You must paste at least one ID before converting.")
-        st.stop()
+    else:
+        with st.spinner("Converting IDs..."):
+            mapping_df = read_mapping_from_zip(MAPPING_ZIP_PATH, MAPPING_FILENAME)
 
-    # Én samlet spinner, så det er tydeligt at appen arbejder
-    with st.spinner("Converting IDs..."):
-        mapping_df = read_mapping_from_zip(MAPPING_ZIP_PATH, MAPPING_FILENAME)
+            if mapping_df.empty:
+                st.error("Mapping file is empty or unreadable.")
+            else:
+                missing = [c for c in [OLD_COL_NAME, EAN_COL_NAME] if c not in mapping_df.columns]
+                if missing:
+                    st.error(
+                        f"Required column(s) missing in mapping.csv: {missing}\n"
+                        f"Actual columns: {list(mapping_df.columns)}"
+                    )
+                else:
+                    for h in OUTPUT_HEADERS:
+                        if h not in mapping_df.columns:
+                            mapping_df[h] = None
 
-        if mapping_df.empty:
-            st.error("Mapping file is empty or unreadable.")
-            st.stop()
+                    results = exact_lookup(ids, mapping_df)
+                    matches_count = int((results["Match Type"] != "No match").sum())
 
-        # Tjek nødvendige kolonner
-        missing = [c for c in [OLD_COL_NAME, EAN_COL_NAME] if c not in mapping_df.columns]
-        if missing:
-            st.error(
-                f"Required column(s) missing in mapping.csv: {missing}\n"
-                f"Actual columns: {list(mapping_df.columns)}"
-            )
-            st.stop()
+                    results_sorted = results.sort_values(
+                        by=["Match Type", "Query"],
+                        ascending=[True, True],
+                    )
+                    display_cols = ["Query", "Match Type"] + OUTPUT_HEADERS
+                    display_df = results_sorted[display_cols]
 
-        # Sørg for at alle outputkolonner findes (Family/Category kan mangle i CSV)
-        for h in OUTPUT_HEADERS:
-            if h not in mapping_df.columns:
-                mapping_df[h] = None
+                    st.session_state["results_df"] = display_df
+                    st.session_state["matches_count"] = matches_count
+                    st.session_state["ids_count"] = len(ids)
 
-        # Exact lookup via index
-        results = exact_lookup(ids, mapping_df)
+# ---------------------------------------------------------
+# VIS RESULTATER, HVIS DE FINDES
+# ---------------------------------------------------------
+if "results_df" in st.session_state:
+    display_df = st.session_state["results_df"]
+    matches_count = st.session_state.get("matches_count", 0)
+    ids_count = st.session_state.get("ids_count", 0)
 
-        matches_count = (results["Match Type"] != "No match").sum()
-        results_sorted = results.sort_values(
-            by=["Match Type", "Query"],
-            ascending=[True, True],
-        )
-
-        display_cols = ["Query", "Match Type"] + OUTPUT_HEADERS
-        display_df = results_sorted[display_cols]
-
-    # Når vi kommer herud, er spinneren væk
     st.header("2. Results")
-    st.metric("IDs Provided", len(ids))
+    st.metric("IDs Provided", ids_count)
     st.metric("IDs with a match", matches_count)
 
     st.dataframe(display_df, use_container_width=True, hide_index=True)
@@ -297,6 +315,5 @@ if submitted:
         file_name="muuto_item_conversion.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
 else:
     st.info("Paste your IDs above and click **Convert IDs** to run the lookup.")
