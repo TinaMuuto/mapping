@@ -4,9 +4,7 @@ from io import BytesIO
 import os
 import re
 from typing import List
-import time
 import zipfile
-from rapidfuzz import fuzz, process  # til fuzzy matching
 
 # --- Paths og konstanter ---
 try:
@@ -52,7 +50,7 @@ st.markdown(
         h1 { color: #5B4A14; font-size: 2.5em; margin-top: 0; }
         h2 { color: #333 !important; border-bottom: 1px solid #CCC; }
 
-        div[data-testid="stDownloadButton"] p { color: white !important; }
+        /* Hvid tekst på alle knapper */
         div[data-testid="stDownloadButton"] button,
         div[data-testid="stButton"] button {
             border: 1px solid #5B4A14 !important;
@@ -62,6 +60,11 @@ st.markdown(
             border-radius: 0.25rem !important;
             font-weight: 600 !important;
             text-transform: uppercase !important;
+            color: #FFFFFF !important;
+        }
+
+        div[data-testid="stDownloadButton"] p {
+            color: #FFFFFF !important;
         }
     </style>
     """,
@@ -101,9 +104,9 @@ def normalize_id(s: str) -> str:
     """
     Normaliser ID til match:
     - upper case
-    - fjern mellemrum og bindestreger
+    - fjern ALT der ikke er A-Z eller 0-9 (inkl. mellemrum, '-', '.', '/')
     """
-    return re.sub(r"[\s\-]+", "", str(s)).upper()
+    return re.sub(r"[^A-Z0-9]", "", str(s).upper())
 
 
 @st.cache_data(show_spinner=False)
@@ -124,7 +127,7 @@ def read_mapping_from_zip(zip_path: str, filename: str) -> pd.DataFrame:
                 head = f.read(5000).decode("utf-8", errors="ignore")
                 sep = autodetect_separator(head)
 
-            # Læs hele filen med funden separator
+            # Læs hele filen med den fundne separator
             with zf.open(filename) as f:
                 df = pd.read_csv(
                     f,
@@ -152,50 +155,69 @@ def to_xlsx_bytes(df: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 
-def fuzzy_lookup(ids: List[str], df: pd.DataFrame) -> pd.DataFrame:
+def deterministic_lookup(ids: List[str], df: pd.DataFrame) -> pd.DataFrame:
     """
     For hvert ID:
-    1) Forsøg normaliseret exact match (case-insensitivt, ignorerer mellemrum og '-')
-    2) Hvis ingen: fuzzy match mod normaliserede værdier
-    3) Hvis stadig ingen: tom række med Match Score = 0
+    1) Exact match på normaliseret værdi (OLD / EAN)
+    2) Hvis ingen: prefix-match begge veje (ID starter med mapping, mapping starter med ID)
+    3) Hvis ingen: substring-match
+    4) Hvis stadig ingen: tom række
     """
-    rows = []
 
-    # Kandidatliste til fuzzy (normaliserede værdier)
-    candidates = df["_OLD_norm"].dropna().unique().tolist() + df["_EAN_norm"].dropna().unique().tolist()
+    rows = []
 
     for raw_id in ids:
         norm_id = normalize_id(raw_id)
 
-        # Exact på normaliseret værdi
+        # Exact match på normaliserede kolonner
         exact = df[(df["_OLD_norm"] == norm_id) | (df["_EAN_norm"] == norm_id)]
 
         if not exact.empty:
             tmp = exact.copy()
             tmp["Query"] = raw_id
-            tmp["Match Score"] = 100
+            tmp["Match Type"] = "Exact"
             rows.append(tmp)
             continue
 
-        # Fuzzy fallback
-        best = process.extractOne(
-            norm_id,
-            candidates,
-            scorer=fuzz.WRatio,
-        )
+        # Prefix: mapping starter med ID
+        prefix_old = df[df["_OLD_norm"].str.startswith(norm_id)]
+        prefix_ean = df[df["_EAN_norm"].str.startswith(norm_id)]
 
-        if best and best[1] >= 60:  # threshold kan justeres
-            best_norm_value, score = best[0], best[1]
-            fuzzy_rows = df[(df["_OLD_norm"] == best_norm_value) | (df["_EAN_norm"] == best_norm_value)].copy()
-            fuzzy_rows["Query"] = raw_id
-            fuzzy_rows["Match Score"] = score
-            rows.append(fuzzy_rows)
-        else:
-            # Intet match
-            empty_row = {h: None for h in OUTPUT_HEADERS}
-            empty_row["Query"] = raw_id
-            empty_row["Match Score"] = 0
-            rows.append(pd.DataFrame([empty_row]))
+        if not prefix_old.empty or not prefix_ean.empty:
+            tmp = pd.concat([prefix_old, prefix_ean]).drop_duplicates()
+            tmp["Query"] = raw_id
+            tmp["Match Type"] = "Prefix (ID shorter)"
+            rows.append(tmp)
+            continue
+
+        # Prefix: ID starter med mapping (mapping er "basis", ID mere detaljeret)
+        prefix_old_rev = df[df["_OLD_norm"].apply(lambda x: norm_id.startswith(x) if isinstance(x, str) else False)]
+        prefix_ean_rev = df[df["_EAN_norm"].apply(lambda x: norm_id.startswith(x) if isinstance(x, str) else False)]
+
+        if not prefix_old_rev.empty or not prefix_ean_rev.empty:
+            tmp = pd.concat([prefix_old_rev, prefix_ean_rev]).drop_duplicates()
+            tmp["Query"] = raw_id
+            tmp["Match Type"] = "Prefix (mapping shorter)"
+            rows.append(tmp)
+            continue
+
+        # Substring-match som sidste forsøg
+        substr = df[
+            df["_OLD_norm"].str.contains(norm_id, na=False)
+            | df["_EAN_norm"].str.contains(norm_id, na=False)
+        ]
+        if not substr.empty:
+            tmp = substr.copy()
+            tmp["Query"] = raw_id
+            tmp["Match Type"] = "Substring"
+            rows.append(tmp)
+            continue
+
+        # Ingen match
+        empty_row = {h: None for h in OUTPUT_HEADERS}
+        empty_row["Query"] = raw_id
+        empty_row["Match Type"] = "No match"
+        rows.append(pd.DataFrame([empty_row]))
 
     result = pd.concat(rows, ignore_index=True)
 
@@ -221,7 +243,7 @@ with left:
         **How It Works**
         1. Paste IDs  
         2. Click **Convert IDs**  
-        3. See exact and fuzzy matches (with score)  
+        3. See matches (Exact / Prefix / Substring)  
         4. Download results  
         """
     )
@@ -245,46 +267,51 @@ if submitted:
         st.error("You must paste at least one ID before converting.")
         st.stop()
 
-    with st.spinner("Loading mapping file..."):
+    # Én samlet spinner, så det er tydeligt at appen arbejder
+    with st.spinner("Converting IDs..."):
         mapping_df = read_mapping_from_zip(MAPPING_ZIP_PATH, MAPPING_FILENAME)
 
-    if mapping_df.empty:
-        st.error("Mapping file is empty or unreadable.")
-        st.stop()
+        if mapping_df.empty:
+            st.error("Mapping file is empty or unreadable.")
+            st.stop()
 
-    # Tjek nødvendige kolonner
-    missing = [c for c in [OLD_COL_NAME, EAN_COL_NAME] if c not in mapping_df.columns]
-    if missing:
-        st.error(f"Required column(s) missing in mapping.csv: {missing}\nActual columns: {list(mapping_df.columns)}")
-        st.stop()
+        # Tjek nødvendige kolonner
+        missing = [c for c in [OLD_COL_NAME, EAN_COL_NAME] if c not in mapping_df.columns]
+        if missing:
+            st.error(
+                f"Required column(s) missing in mapping.csv: {missing}\n"
+                f"Actual columns: {list(mapping_df.columns)}"
+            )
+            st.stop()
 
-    # Normaliser kolonner til match
-    mapping_df["_OLD_norm"] = mapping_df[OLD_COL_NAME].apply(normalize_id)
-    mapping_df["_EAN_norm"] = mapping_df[EAN_COL_NAME].apply(normalize_id)
+        # Normaliser kolonner til match
+        mapping_df["_OLD_norm"] = mapping_df[OLD_COL_NAME].apply(normalize_id)
+        mapping_df["_EAN_norm"] = mapping_df[EAN_COL_NAME].apply(normalize_id)
 
-    # Sørg for at alle outputkolonner findes (Family/Category kan mangle i CSV)
-    for h in OUTPUT_HEADERS:
-        if h not in mapping_df.columns:
-            mapping_df[h] = None
+        # Sørg for at alle outputkolonner findes (Family/Category kan mangle i CSV)
+        for h in OUTPUT_HEADERS:
+            if h not in mapping_df.columns:
+                mapping_df[h] = None
 
-    with st.spinner("Matching IDs..."):
-        results = fuzzy_lookup(ids, mapping_df)
+        # Deterministisk match (exact + prefix + substring)
+        results = deterministic_lookup(ids, mapping_df)
 
+        matches_count = (results["Match Type"] != "No match").sum()
+        results_sorted = results.sort_values(
+            by=["Match Type", "Query"],
+            ascending=[True, True],
+        )
+
+        display_cols = ["Query", "Match Type"] + OUTPUT_HEADERS
+        display_df = results_sorted[display_cols]
+
+    # Når vi kommer herud, er spinneren væk
     st.header("2. Results")
-
-    matches_with_score = results["Match Score"].gt(0).sum()
     st.metric("IDs Provided", len(ids))
-    st.metric("IDs with a match", matches_with_score)
-
-    # Sortér så højeste matchscore står øverst
-    results_sorted = results.sort_values(by=["Match Score"], ascending=False)
-
-    display_cols = ["Query", "Match Score"] + OUTPUT_HEADERS
-    display_df = results_sorted[display_cols]
+    st.metric("IDs with a match", matches_count)
 
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # Download
     xlsx = to_xlsx_bytes(display_df)
     st.download_button(
         "Download Excel File",
