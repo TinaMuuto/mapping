@@ -230,9 +230,10 @@ with left:
         Your **EAN numbers remain unchanged**, but the **old Muuto item numbers have been replaced to ensure a clearer and more consistent structure**.
 
         **How to use the tool:**
-        1. Copy the Muuto item numbers you currently have in your system.  
-        2. Paste them into the field below.  
-        3. The tool will return:  
+        1. Copy the Muuto item numbers or EAN Codes you currently have in your system.  
+        2. Paste them into the field below.
+        3. You can enter the item numbers in any format. One item number per line. Multiple item numbers on the same line. Item numbers separated by spaces, commas, or semicolons. A mix of different separators.
+        4. The tool will return a file with:  
             - The new Muuto item number  
             - The corresponding EAN  
             - The product description  
@@ -246,10 +247,10 @@ with right:
     if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, width=120)
 
-st.header("1. Paste Item Numbers")
+st.header("Copy/Paste Item Numbers or EAN Codes")
 
 raw_input = st.text_area(
-    "Paste Old Muuto Item Numbers here:",
+    "Paste Old Muuto Item Numbers or EAN codes here:",
     height=200,
     key="ids_input",
 )
