@@ -16,8 +16,7 @@ except NameError:
 # -----------------------------
 # Constants
 # -----------------------------
-# The Google Sheet URL remains here, but is hidden from the customer UI.
-DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1S50it_q1BahpZCPW8dbuN7DyOMnyDgFIg76xIDSoXEk/edit?gid=1056617222#gid=1056617222"
+MAPPING_FILE = os.path.join(BASE_DIR, "mapping.xlsx")
 
 OUTPUT_HEADERS = [
     "New Item No.",
@@ -65,7 +64,7 @@ st.markdown(
     /* Inputs - Focus state */
     div[data-testid="stTextArea"] textarea:focus,
     div[data-testid="stTextInput"] input:focus,
-    div[data-testid="stSelectbox"] div[data-baseweb="select"][aria-expanded="true"] > div:first-child,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"][aria-expanded="true"]>div:first-child,
     div[data-testid="stMultiSelect"] div[data-baseweb="input"]:focus-within,
     div[data-testid="stMultiSelect"] div[aria-expanded="true"] {
         border-color: #5B4A14 !important; box-shadow: 0 0 0 1px #5B4A14 !important;
@@ -115,53 +114,31 @@ def parse_pasted_ids(raw: str) -> List[str]:
     tokens = re.split(r"[\s,;]+", raw.strip())
     cleaned = [t.strip().strip('"').strip("'") for t in tokens if t.strip()]
     seen, out = set(), []
-    for t in tokens:
+    for t in cleaned:
         if t not in seen:
             seen.add(t)
             out.append(t)
     return out
 
 
-def to_csv_export_url(url: str) -> str:
-    """
-    Accepts a Google Sheets URL and returns a direct CSV export URL.
-    """
-    if not url:
-        return ""
-    url = url.strip()
-    
-    m_edit = re.search(r"https://docs.google.com/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
-    if m_edit:
-        sheet_id = m_edit.group(1)
-        gid_match = re.search(r"[?&#]gid=(\d+)", url)
-        gid = gid_match.group(1) if gid_match else "0"
-        return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
-        
-    m_pub = re.search(r"https://docs.google.com/spreadsheets/d/e/([a-zA-Z0-9-_]+)", url)
-    if m_pub:
-        doc_id_e = m_pub.group(1)
-        gid_match = re.search(r"[?&#]gid=(\d+)", url)
-        gid = gid_match.group(1) if gid_match else "0"
-        return f"https://docs.google.com/spreadsheets/d/e/{doc_id_e}/pub?gid={gid}&single=true&output=csv"
-        
-    return url
-
-
 @st.cache_data(show_spinner="Loading and preparing mapping database...")
-def read_mapping_from_gsheets(csv_url: str) -> pd.DataFrame:
-    """Loads mapping data from Google Sheets (internal function)."""
-    if not csv_url:
+def read_mapping_from_excel(path: str) -> pd.DataFrame:
+    """Loads mapping data from a local Excel file (mapping.xlsx)."""
+    if not path or not os.path.exists(path):
+        st.error(
+            "❌ Konverteringsfejl: Mappingsfilen 'mapping.xlsx' blev ikke fundet i applikationens mappe."
+        )
         return pd.DataFrame()
     try:
-        df = pd.read_csv(csv_url, dtype=str, keep_default_na=False, on_bad_lines='skip')
+        df = pd.read_excel(path, dtype=str)
         for c in df.columns:
             if df[c].dtype == object:
                 df[c] = df[c].astype(str).str.strip()
         return df
     except Exception as e:
         st.error(
-            "❌ **Conversion Tool Error.** The mapping database could not be loaded. "
-            "Please try refreshing the page. If the issue persists, contact Muuto support."
+            "❌ Konverteringsfejl: Mappingsfilen kunne ikke indlæses. "
+            "Kontrollér at 'mapping.xlsx' er en gyldig Excel-fil og prøv igen."
         )
         return pd.DataFrame()
 
@@ -204,8 +181,7 @@ def to_xlsx_bytes_with_spinner(df: pd.DataFrame, sheet_name: str = "Conversion O
 # -----------------------------
 # Internal Setup (Hidden from UI)
 # -----------------------------
-csv_url = to_csv_export_url(DEFAULT_SHEET_URL)
-mapping_df = read_mapping_from_gsheets(csv_url) if csv_url else pd.DataFrame()
+mapping_df = read_mapping_from_excel(MAPPING_FILE)
 
 # Check for successful internal load
 if mapping_df.empty:
@@ -217,7 +193,7 @@ colmap = map_case_insensitive(mapping_df, required)
 
 if not colmap.get("OLD Item-variant") or not colmap.get("Ean no."):
     st.error(
-        "❌ Internal Error: Required mapping columns are missing. Please contact Muuto support."
+        "❌ Internal Error: Required mapping columns are missing in 'mapping.xlsx'. Please contact Muuto support."
     )
     st.stop()
 
@@ -274,9 +250,6 @@ ids = parse_pasted_ids(raw_input)
 # Conditional Logic: Load data only if IDs are present
 # -----------------------------
 if ids:
-    # --- Internal Setup (TRIGGERED HERE) ---
-    # The setup logic is defined outside the main blocks, but the data is only loaded here.
-    
     # -----------------------------
     # Step 2: Results and Export
     # -----------------------------
