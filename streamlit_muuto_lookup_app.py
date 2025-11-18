@@ -232,7 +232,12 @@ with left:
         **How to use the tool:**
         1. Copy the Muuto item numbers or EAN Codes you currently have in your system.  
         2. Paste them into the field below.
-        3. You can enter the item numbers in any format. One item number per line. Multiple item numbers on the same line. Item numbers separated by spaces, commas, or semicolons. A mix of different separators.
+        3. You can enter the item numbers or EAN Codes in any format.   
+            - One number per line.
+            - Multiple numbers on the same line.
+            - Numbers separated by spaces, commas, or semicolons.
+            - A mix of different separators.
+            
         4. The tool will return a file with:  
             - The new Muuto item number  
             - The corresponding EAN  
